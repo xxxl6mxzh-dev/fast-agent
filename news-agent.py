@@ -1,5 +1,5 @@
 """
-Fast 新闻速递 Agent — AI 聚焦版，每天早上9点推送到手机
+Fast AI 早报 Agent — 每天9点推送，AI专题 + 中文翻译
 """
 import smtplib
 import ssl
@@ -17,23 +17,41 @@ if not SMTP_CODE:
     exit(1)
 
 
+def translate_en_zh(text):
+    """免费翻译 en→zh（MyMemory API），失败返回 None"""
+    if not text or any('一' <= c <= '鿿' for c in text[:20]):
+        return None
+    try:
+        t = text[:200]
+        url = f"https://api.mymemory.translated.net/get?q={urllib.request.quote(t)}&langpair=en|zh&de=fastagent"
+        data = json.loads(urllib.request.urlopen(url, timeout=5).read())
+        result = data.get("responseData", {}).get("translatedText", "")
+        if result and result != t and len(result) > 2:
+            return result
+    except Exception:
+        pass
+    return None
+
+
 def fetch_github_trending():
-    """GitHub AI 热门仓库（免费 API，无需 key）"""
+    """GitHub AI 热门仓库，附中文翻译"""
     items = []
     try:
         url = "https://api.github.com/search/repositories?q=AI+artificial-intelligence+created:>=" + \
-              (datetime.now().strftime("%Y-%m-") + "01") + \
-              "&sort=stars&order=desc&per_page=8"
+              datetime.now().strftime("%Y-%m-") + "01&sort=stars&order=desc&per_page=8"
         req = urllib.request.Request(url, headers={
             "User-Agent": "FastAgent/1.0",
             "Accept": "application/vnd.github.v3+json"
         })
         data = json.loads(urllib.request.urlopen(req, timeout=10).read())
         for repo in data.get("items", []):
+            desc = repo.get("description") or ""
+            zh = translate_en_zh(desc) if desc else None
             items.append({
-                "title": f"{repo['full_name']} — ⭐{repo['stargazers_count']} {repo.get('description','')[:60]}",
+                "title": f"{repo['full_name']} ⭐{repo['stargazers_count']}",
                 "url": repo["html_url"],
-                "source": "GitHub AI"
+                "source": "GitHub AI",
+                "zh": zh or desc
             })
     except Exception:
         pass
@@ -41,7 +59,7 @@ def fetch_github_trending():
 
 
 def fetch_arxiv_ai():
-    """arXiv AI 最新论文（免费 RSS）"""
+    """arXiv AI 最新论文，标题附中文翻译"""
     items = []
     try:
         url = "http://export.arxiv.org/api/query?search_query=cat:cs.AI&sortBy=submittedDate&sortOrder=descending&max_results=8"
@@ -49,17 +67,19 @@ def fetch_arxiv_ai():
         xml = urllib.request.urlopen(req, timeout=15).read().decode("utf-8")
         entries = xml.split("<entry>")[1:]
         for entry in entries[:8]:
-            title_start = entry.find("<title>") + 7
-            title_end = entry.find("</title>")
-            id_start = entry.find("<id>") + 4
-            id_end = entry.find("</id>")
-            if title_end > title_start and id_end > id_start:
-                title = entry[title_start:title_end].strip().replace("\n", " ")
-                arxiv_id = entry[id_start:id_end].strip()
+            ts = entry.find("<title>") + 7
+            te = entry.find("</title>")
+            if ts > 6 and te > ts:
+                title = entry[ts:te].strip().replace("\n", " ").replace("  ", " ")
+                is_ = entry.find("<id>") + 4
+                ie = entry.find("</id>")
+                arxiv_url = entry[is_:ie].strip() if is_ > 3 and ie > is_ else ""
+                zh = translate_en_zh(title) if title else None
                 items.append({
-                    "title": title[:120],
-                    "url": arxiv_id.replace("abs", "abs"),
-                    "source": "arXiv AI"
+                    "title": title,
+                    "url": arxiv_url,
+                    "source": "arXiv AI",
+                    "zh": zh or ""
                 })
     except Exception:
         pass
@@ -67,10 +87,9 @@ def fetch_arxiv_ai():
 
 
 def fetch_general_news():
-    """综合新闻：微博+知乎"""
+    """综合新闻：知乎 + 微博"""
     items = []
 
-    # 知乎热榜
     try:
         req = urllib.request.Request(
             "https://api.zhihu.com/topstory/hot-lists/total?limit=15",
@@ -78,15 +97,14 @@ def fetch_general_news():
         )
         data = json.loads(urllib.request.urlopen(req, timeout=10).read())
         for item in data.get("data", [])[:8]:
-            target = item.get("target", {})
-            title = target.get("title", "")
-            url = target.get("url", "")
+            t = item.get("target", {})
+            title = t.get("title", "")
+            url = t.get("url", "")
             if title:
                 items.append({"title": title, "url": url, "source": "知乎"})
     except Exception:
         pass
 
-    # 微博热搜
     try:
         req = urllib.request.Request(
             "https://weibo.com/ajax/side/hotSearch",
@@ -105,44 +123,44 @@ def fetch_general_news():
 
 
 def build_email_body(sections):
-    """卡片式排版，分 AI 板块 + 综合板块"""
     today = datetime.now().strftime("%Y年%m月%d日")
-    section_colors = {
+    colors = {
         "🤖 AI 开源热榜": "#00d2ff",
         "📄 arXiv 最新论文": "#7c4dff",
         "🌐 综合新闻": "#e0245e"
     }
 
-    all_cards = ""
-    global_count = 0
-
-    for section_title, items in sections:
+    cards = ""
+    n = 0
+    for sec_title, items in sections:
         if not items:
             continue
-        color = section_colors.get(section_title, "#666")
-        all_cards += f"""
+        color = colors.get(sec_title, "#666")
+        cards += f"""
     <div style='margin:20px 0 10px;display:flex;align-items:center;gap:8px;'>
       <div style='width:4px;height:20px;background:{color};border-radius:2px;'></div>
-      <span style='color:{color};font-size:16px;font-weight:700;'>{section_title}</span>
+      <span style='color:{color};font-size:16px;font-weight:700;'>{sec_title}</span>
       <span style='color:#3a4a5a;font-size:11px;'>{len(items)}条</span>
     </div>"""
 
         for item in items:
-            global_count += 1
-            src = item["source"]
-            if item["url"]:
-                title_html = f"<a href='{item['url']}' style='color:#d0d0d0;text-decoration:none;font-size:14px;line-height:1.6;'>{item['title']}</a>"
-            else:
-                title_html = f"<span style='color:#d0d0d0;font-size:14px;'>{item['title']}</span>"
+            n += 1
+            src = item.get("source", "")
+            title = item.get("title", "")
+            url = item.get("url", "")
+            zh = item.get("zh", "")
 
+            title_html = f"<a href='{url}' style='color:#d0d0d0;text-decoration:none;font-size:14px;line-height:1.6;'>{title}</a>" if url else f"<span style='color:#d0d0d0;font-size:14px;'>{title}</span>"
+            zh_html = f"<div style='color:#78909c;font-size:12px;margin-top:3px;line-height:1.5;'>{zh}</div>" if zh else ""
             badge = f"<span style='display:inline-block;color:{color};font-size:10px;padding:2px 6px;border:1px solid {color};border-radius:8px;margin-left:6px;vertical-align:middle;white-space:nowrap;'>{src}</span>" if src else ""
 
-            all_cards += f"""
+            cards += f"""
     <div style='background:#1a2838;border-radius:8px;padding:12px 14px;margin-bottom:6px;border-left:2px solid {color};'>
       <div style='display:flex;align-items:flex-start;gap:8px;'>
-        <span style='color:{color};font-size:11px;font-weight:600;min-width:16px;padding-top:3px;'>#{global_count}</span>
+        <span style='color:{color};font-size:11px;font-weight:600;min-width:16px;padding-top:3px;'>#{n}</span>
         <div style='flex:1;min-width:0;'>
           {title_html}
+          {zh_html}
           {badge}
         </div>
       </div>
@@ -153,10 +171,10 @@ def build_email_body(sections):
 <div style='text-align:center;padding:24px 0 12px;'>
   <div style='font-size:30px;font-weight:900;color:#e94560;letter-spacing:3px;'>FAST AI 早报</div>
   <div style='color:#5a7a9a;font-size:12px;margin-top:2px;'>{today} · 点击卡片跳转原文</div>
-  <div style='color:#3a4a5a;font-size:11px;margin-top:1px;'>AI 前沿 × 综合资讯 · 共 {global_count} 条</div>
+  <div style='color:#3a4a5a;font-size:11px;margin-top:1px;'>AI 前沿 × 综合资讯 · 共 {n} 条</div>
 </div>
 <div style='padding:0 2px;'>
-  {all_cards}
+  {cards}
 </div>
 <div style='text-align:center;padding:20px 0 6px;'>
   <div style='color:#3a4a5a;font-size:11px;'>Fast 管家自动推送 · 每日 9:00</div>
@@ -172,10 +190,9 @@ def send_email(html_body):
     msg["To"] = QQ_EMAIL
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
-    context = ssl.create_default_context()
-    with smtplib.SMTP_SSL("smtp.qq.com", 465, context=context) as server:
-        server.login(QQ_EMAIL, SMTP_CODE)
-        server.sendmail(QQ_EMAIL, QQ_EMAIL, msg.as_string())
+    with smtplib.SMTP_SSL("smtp.qq.com", 465, context=ssl.create_default_context()) as s:
+        s.login(QQ_EMAIL, SMTP_CODE)
+        s.sendmail(QQ_EMAIL, QQ_EMAIL, msg.as_string())
 
 
 def main():
@@ -190,8 +207,8 @@ def main():
     total = sum(len(items) for _, items in sections)
     print(f"  → 共 {total} 条资讯")
 
-    body = build_email_body(sections)
-    send_email(body)
+    build = build_email_body(sections)
+    send_email(build)
 
     print(f"  → 已发送 {QQ_EMAIL}")
     print(f"[{datetime.now():%H:%M:%S}] 完成")

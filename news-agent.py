@@ -61,26 +61,41 @@ def fetch_news():
 
 def build_email_body(news_items):
     today = datetime.now().strftime("%Y年%m月%d日")
-    rows = ""
+    source_colors = {"微博热搜": "#e0245e", "知乎热榜": "#0084ff"}
+
+    cards = ""
     for i, item in enumerate(news_items, 1):
-        tag = f"[{item['source']}]" if item["source"] else ""
+        src = item["source"]
+        color = source_colors.get(src, "#666")
+        badge = f"<span style='display:inline-block;background:{color};color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;margin-left:8px;vertical-align:middle;'>{src}</span>" if src else ""
+
         if item["url"]:
-            row = f"{i}. {tag} <a href='{item['url']}' style='color:#4fc3f7;text-decoration:none;'>{item['title']}</a>"
+            title_html = f"<a href='{item['url']}' style='color:#e0e0e0;text-decoration:none;font-size:15px;line-height:1.6;'>{item['title']}</a>"
         else:
-            row = f"{i}. {tag} {item['title']}"
-        rows += row + "\n                "
+            title_html = f"<span style='color:#e0e0e0;font-size:15px;'>{item['title']}</span>"
+
+        cards += f"""
+    <div style='background:#1e2d4a;border-radius:10px;padding:14px 16px;margin-bottom:10px;border-left:3px solid {color};'>
+      <div style='display:flex;align-items:flex-start;gap:8px;'>
+        <span style='color:{color};font-size:13px;font-weight:700;min-width:20px;padding-top:2px;'>#{i}</span>
+        <div style='flex:1;'>
+          {title_html}
+          {badge}
+        </div>
+      </div>
+    </div>"""
 
     return f"""<!DOCTYPE html>
-<html><body style="font-family:'Microsoft YaHei',sans-serif;max-width:600px;margin:0 auto;padding:20px;background:#1a1a2e;color:#eee;">
-<div style="background:#16213e;border-radius:12px;padding:24px;">
-  <h2 style="color:#e94560;margin-top:0;">Fast 新闻速递</h2>
-  <p style="color:#aaa;font-size:13px;">{today} 早间简报 · 点击标题跳转原文</p>
-  <hr style="border-color:#333;margin:16px 0;">
-  <div style="font-size:14px;line-height:2.2;color:#ccc;">
-    {rows}
-  </div>
-  <hr style="border-color:#333;margin:16px 0;">
-  <p style="color:#555;font-size:11px;text-align:center;">— Fast 管家自动推送 · 每天早上9点 —</p>
+<html><body style="font-family:'Microsoft YaHei',sans-serif;max-width:600px;margin:0 auto;padding:16px;background:#0f1923;">
+<div style='text-align:center;padding:20px 0 10px;'>
+  <div style='font-size:28px;font-weight:800;color:#e94560;letter-spacing:2px;'>FAST 早报</div>
+  <div style='color:#5a7a9a;font-size:12px;margin-top:4px;'>{today} · 点击卡片跳转原文</div>
+</div>
+<div style='padding:0 4px;'>
+  {cards}
+</div>
+<div style='text-align:center;padding:16px 0 4px;color:#3a4a5a;font-size:11px;'>
+  Fast 管家自动推送 · 每日 9:00
 </div>
 </body></html>"""
 

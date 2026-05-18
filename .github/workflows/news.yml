@@ -1,8 +1,8 @@
-name: Fast 新闻速递
+name: Fast News Agent
 on:
   schedule:
-    - cron: '0 1 * * *'   # 北京时间 9:00 = UTC 1:00
-  workflow_dispatch:       # 允许手动触发测试
+    - cron: '0 1 * * *'
+  workflow_dispatch:
 
 jobs:
   news:
@@ -12,7 +12,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: 运行新闻速递
+      - name: Run news agent
         env:
           QQ_SMTP_CODE: ${{ secrets.QQ_SMTP_CODE }}
         run: python news-agent.py

@@ -1,7 +1,7 @@
 name: Fast News Agent
 on:
-  schedule:
-    - cron: '0 1 * * *'   # UTC 1:00 = 中国时间 9:00
+#  schedule:
+#    - cron: '0 1 * * *'   # 已切到本地定时任务，GitHub停用
   workflow_dispatch:
 
 jobs:
